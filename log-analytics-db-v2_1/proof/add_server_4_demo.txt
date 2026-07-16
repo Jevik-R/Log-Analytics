@@ -1,0 +1,15 @@
+=====================================================================
+DEMO: Cost of adding Server #4
+=====================================================================
+
+--- NEW DESIGN: 2 statements, zero query changes ---
+Done. Verifying no query rewrite needed -- query #13 from 05_optimized_queries.sql, unmodified, now includes server 4 automatically once data exists:
+Server_ID	COUNT(*)
+1	11018
+2	11498
+3	11401
+
+--- ORIGINAL DESIGN would require: ---
+1. CREATE TABLE Server_ID_4_Application_Logs (...)  -- full DDL repeated
+2. Same for Server_ID_4_Logs, _Server_Logs, _Security_Logs, _Production_Logs (5 new tables)
+3. Manually add a 4th UNION ALL branch to every cross-server query (7 of the 14 original queries)

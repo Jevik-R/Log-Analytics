@@ -1,0 +1,8 @@
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	Application_Logs	p_server_2	ref	PRIMARY,idx_app_ip_ts,idx_app_ts,idx_app_status	PRIMARY	4	const	5643	100.00	NULL
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	Application_Logs	p_server_3	ref	PRIMARY,idx_app_ip_ts,idx_app_ts,idx_app_status	idx_app_status	4	const	5700	100.00	Using index
+id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
+1	SIMPLE	Application_Logs	p_server_1,p_server_2,p_server_3	index	NULL	idx_app_status	6	NULL	33649	100.00	Using index
+EXPLAIN
+-> Filter: (Server_Metrics_Logs.CPU_Utilization_Pct > 90.00)  (cost=67.4 rows=662) (actual time=1.52..1.52 rows=0 loops=1)\n    -> Index lookup on Server_Metrics_Logs using PRIMARY (Server_ID=1)  (cost=67.4 rows=1985) (actual time=0.062..1.22 rows=3971 loops=1)\n
