@@ -1,7 +1,0 @@
-=== Single-server filter query (Server 2, GET requests) ===
-ORIGINAL (no index, direct table): avg=6.008ms  best=5.650ms
-NEW (partitioned+indexed):         avg=3.222ms  best=3.024ms
-
-=== Cross-server aggregate (endpoint hit counts, all servers) ===
-ORIGINAL (3-way UNION ALL):        avg=29.610ms  best=28.416ms
-NEW (single GROUP BY):             avg=24.288ms  best=23.313ms
