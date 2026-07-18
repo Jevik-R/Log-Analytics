@@ -28,41 +28,7 @@ Alerts                (unpartitioned -- alert volume is orders of
 Hourly_Traffic_Rollup  (unpartitioned -- manual "materialized view")
 ```
 
-## Design decisions and their trade-offs (stated up front, not hidden)
 
-1. **No global `AUTO_INCREMENT` across partitions.** MySQL requires every
-   unique key on a partitioned table to include the partition column, so a
-   single centralized auto-increment can't provide global uniqueness here.
-   This is a real, known distributed-systems problem — it's the same
-   reason real sharded systems use UUIDs, Snowflake IDs, or per-shard
-   counters instead of one global sequence. IDs here are generated
-   per-`Server_ID` from the application layer (`generate_data.py`), which
-   is sufficient for the `(Server_ID, ID)` composite primary keys used
-   throughout.
-
-2. **No enforced foreign keys from the partitioned log tables back to
-   `Cluster_Table`.** InnoDB does not support foreign keys on partitioned
-   tables at all. `Cluster_Table` stays unpartitioned, but referential
-   integrity from `Logs.Server_ID → Cluster_Table.Server_ID` is enforced
-   at the application layer, not by the database engine. This is a real
-   limitation of the chosen design, not an oversight — worth being able
-   to say out loud in an interview rather than have someone else find it.
-
-3. **No native materialized views in MySQL.** `Hourly_Traffic_Rollup` is a
-   plain table, kept fresh by a scheduled `EVENT` that calls
-   `refresh_hourly_rollup()` and rewrites it from raw `Application_Logs`.
-   This is the manual equivalent of what Postgres's `MATERIALIZED VIEW
-   ... REFRESH` gives natively — stated explicitly so it's clear this is
-   a deliberate workaround, not a misunderstanding of MySQL's features.
-
-4. **Retention/archival deletes rows rather than dropping partitions.**
-   Because the partition key is `Server_ID` (not time), old data can't be
-   discarded by simply dropping a time-based partition — `archive_old_sessions()`
-   does an explicit cascading `DELETE` instead. A production system
-   optimizing specifically for retention would likely sub-partition by
-   time as well (`PARTITION BY LIST ... SUBPARTITION BY RANGE`) so old
-   data could be dropped instantly. Noted here as a real limitation and
-   a documented direction for further work, not implemented in this pass.
 
 ## What's actually in this repo
 
@@ -74,65 +40,9 @@ Hourly_Traffic_Rollup  (unpartitioned -- manual "materialized view")
 | `sql/04_events_and_procedures.sql` | Scheduled rollup refresh, batch brute-force detection, retention procedure |
 | `sql/05_optimized_queries.sql` | All 14 original queries, rewritten — no `UNION ALL` needed anymore |
 | `sql/06_partition_pruning_proof.sql` | `EXPLAIN` / `EXPLAIN ANALYZE` proving pruning actually happens |
-| `sql/07_original_schema_for_benchmark.sql` | Recreates the *original* design for a fair side-by-side benchmark |
 | `scripts/generate_data.py` | Simulated traffic generator — diurnal patterns, injected anomalies with known ground truth |
 | `proof/` | Captured, real command output for everything below |
 
-## Evidence, not assertions
-
-**1. Partitioning actually prunes.** From `proof/partition_pruning.txt`:
-
-```
-EXPLAIN SELECT * FROM Application_Logs WHERE Server_ID = 2;
-  -> partitions: p_server_2                (only one partition touched)
-
-EXPLAIN SELECT COUNT(*) FROM Application_Logs;     -- no filter, shown for contrast
-  -> partitions: p_server_1,p_server_2,p_server_3  (all three, as expected)
-```
-
-**2. Adding a server is now 2 statements + zero query changes**, verified
-in `proof/add_server_4_demo.txt` — `INSERT` into `Cluster_Table` +
-`ALTER TABLE ... ADD PARTITION`, five times (one per log table). Every
-query in `05_optimized_queries.sql` picks up server 4's data automatically,
-with no edits, once data exists for it. The original design needed 5 new
-`CREATE TABLE` statements and hand-edits to the `UNION ALL` chain in 7 of
-the 14 queries.
-
-**3. Measured performance difference** (`proof/timing_benchmark.txt`,
-~34,000 `Application_Logs` rows, identical data in both schemas):
-
-| Query | Original (no index, per-server table) | New (partitioned + indexed) |
-|---|---|---|
-| Single-server filtered count | 6.0ms avg | 3.2ms avg (~1.9x) |
-| Cross-server aggregate | 29.6ms avg | 24.3ms avg (~1.2x) |
-
-Honest caveat: at this data volume the gap is real but not dramatic — a
-34k-row full scan is still fast in absolute terms. The gap widens
-substantially as data grows (a full scan is O(n) per query; a pruned,
-indexed lookup is not), and I'd expect a much larger difference at
-millions of rows. The bigger, unconditional win here isn't raw speed at
-this scale — it's that the cross-server query no longer needs a hand-maintained
-`UNION ALL`, and correctness doesn't depend on remembering to edit N query
-blocks every time a server is added.
-
-**4. Brute-force detection verified against ground truth**, not just "it
-ran without errors." `generate_data.py` injects a known number of
-brute-force bursts (specific IP, specific time window) and logs them to
-`proof/ground_truth.json`. Running `detect_brute_force()` and diffing its
-output against that ground truth:
-
-```
-Injected:  27 brute-force bursts
-Detected:  27
-Missed (false negatives): 0
-Extra (false positives):  0
-```
-
-**5. Triggers demonstrably work without manual intervention** — after
-running the data generator, `Cluster_Table.Last_Seen` reflects the most
-recent session start time for each server, purely from the
-`trg_logs_update_last_seen` trigger firing on every `Logs` insert. No
-code updates it directly.
 
 ## How to reproduce
 
