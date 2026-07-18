@@ -1,35 +1,3 @@
--- =====================================================================
--- Log Analytics DB — v2 Schema
--- Redesign of the original "Log-Ingestor" DBMS project.
---
--- KEY DESIGN DECISIONS (documented inline, referenced in README):
---
--- 1. PARTITION KEY = Server_ID (LIST partitioning).
---    Chosen because the dominant query pattern in this system filters
---    or aggregates by an individual server (health checks, per-server
---    cost, per-server traffic), not by time range. A RANGE partition
---    on timestamp would suit a "give me last month across all servers"
---    workload instead — that's not our access pattern here.
---
--- 2. NO GLOBAL AUTO_INCREMENT ACROSS PARTITIONS.
---    MySQL requires every unique key on a partitioned table to include
---    the partitioning column. An AUTO_INCREMENT column can't safely
---    provide global cross-partition uniqueness under that constraint.
---    This is a genuine, well-known distributed-systems problem (the
---    same reason real sharded systems use UUIDs, Snowflake IDs, or
---    per-shard counters instead of a single centralized auto-increment).
---    We generate IDs from the application layer (see generate_data.py)
---    rather than pretending MySQL solves this for us.
---
--- 3. FOREIGN KEYS TO Cluster_Table ARE NOT ENFORCED AT THE DB LEVEL.
---    InnoDB does not support foreign keys on partitioned tables.
---    Cluster_Table stays unpartitioned (small, rarely written), but
---    the reference from Logs/Application_Logs/etc. -> Cluster_Table
---    is enforced at the application layer (generate_data.py validates
---    Server_ID against Cluster_Table before insert). This is called
---    out explicitly rather than hidden, because "why isn't this a
---    real FK?" is exactly the kind of question this design invites.
--- =====================================================================
 
 DROP DATABASE IF EXISTS log_ingestor_v2;
 CREATE DATABASE log_ingestor_v2;
@@ -52,11 +20,6 @@ CREATE TABLE Event_Type_Lookup (
     Event_Name      VARCHAR(100) NOT NULL UNIQUE
 );
 
--- ---------------------------------------------------------------------
--- Core session table: one row per server startup/shutdown session.
--- Partitioned by LIST(Server_ID) — replaces Server_ID_1_Logs /
--- Server_ID_2_Logs / Server_ID_3_Logs from the original design.
--- ---------------------------------------------------------------------
 
 CREATE TABLE Logs (
     Server_ID   INT NOT NULL,
@@ -72,12 +35,7 @@ CREATE TABLE Logs (
     PARTITION p_server_3 VALUES IN (3)
 );
 
--- ---------------------------------------------------------------------
--- Server resource-usage metrics. Replaces Server_ID_N_Server_Logs.
--- Numeric types used throughout instead of VARCHAR('45 %') — the
--- original schema stored percentages/temperatures as strings, forcing
--- every downstream query to REPLACE(...)::numeric. That's fixed here.
--- ---------------------------------------------------------------------
+
 
 CREATE TABLE Server_Metrics_Logs (
     Server_ID           INT NOT NULL,
@@ -97,10 +55,6 @@ CREATE TABLE Server_Metrics_Logs (
     PARTITION p_server_3 VALUES IN (3)
 );
 
--- ---------------------------------------------------------------------
--- Application (HTTP) logs. Replaces Server_ID_N_Application_Logs.
--- Event_Type is now a proper FK-style lookup instead of a bare INT.
--- ---------------------------------------------------------------------
 
 CREATE TABLE Application_Logs (
     Server_ID       INT NOT NULL,
@@ -122,11 +76,6 @@ CREATE TABLE Application_Logs (
     PARTITION p_server_3 VALUES IN (3)
 );
 
--- ---------------------------------------------------------------------
--- Security logs. Replaces Server_ID_N_Security_Logs.
--- Security_Level is now a controlled ENUM instead of free-text
--- matched with LIKE '%suspicious%'.
--- ---------------------------------------------------------------------
 
 CREATE TABLE Security_Logs (
     Server_ID       INT NOT NULL,
@@ -146,9 +95,6 @@ CREATE TABLE Security_Logs (
     PARTITION p_server_3 VALUES IN (3)
 );
 
--- ---------------------------------------------------------------------
--- Production/error logs. Replaces Server_ID_N_Production_Logs.
--- ---------------------------------------------------------------------
 
 CREATE TABLE Production_Logs (
     Server_ID       INT NOT NULL,
@@ -169,12 +115,7 @@ CREATE TABLE Production_Logs (
     PARTITION p_server_3 VALUES IN (3)
 );
 
--- ---------------------------------------------------------------------
--- Alerts — derived/system state, not just an ad hoc query result.
--- Populated by trigger (real-time) and by a scheduled EVENT that
--- re-runs the brute-force detection pattern periodically (batch).
--- Unpartitioned: alert volume is orders of magnitude smaller than logs.
--- ---------------------------------------------------------------------
+
 
 CREATE TABLE Alerts (
     Alert_ID        BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -187,13 +128,7 @@ CREATE TABLE Alerts (
     INDEX idx_alerts_type (Alert_Type)
 );
 
--- ---------------------------------------------------------------------
--- Hourly traffic rollup — MySQL has no native materialized view, so
--- this table + the refresh EVENT in 04_events.sql is the manual
--- equivalent: a real table, periodically repopulated from raw logs,
--- so dashboards read a small pre-aggregated table instead of
--- recomputing from millions of raw Application_Logs rows every time.
--- ---------------------------------------------------------------------
+
 
 CREATE TABLE Hourly_Traffic_Rollup (
     Server_ID       INT NOT NULL,
