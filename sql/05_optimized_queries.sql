@@ -1,16 +1,7 @@
 USE log_ingestor_v2;
 
--- =====================================================================
--- Every query below replaces an equivalent from the original project.
--- The original design forced a 3-way UNION ALL across Server_ID_1/2/3
--- tables in ~half the queries. With Server_ID as a normal filter/group
--- column on partitioned tables, that UNION ALL disappears entirely --
--- MySQL's partition pruning does the "only look at the relevant
--- server's data" work that the UNION ALL was manually doing before.
--- =====================================================================
 
--- 1) Server health classification (was: hardcoded to Server_ID_1_Server_Logs only)
---    Now works for ANY server via a parameter, no per-server query needed.
+-- 1) Server health classification 
 SELECT
     Metric_Timestamp,
     Disk_Space_Usage_MB,
@@ -27,7 +18,7 @@ SELECT
 FROM Server_Metrics_Logs
 WHERE Server_ID = 1;                       -- <- partition pruning kicks in here
 
--- 2) Peak-hour traffic analysis (was: hardcoded Server 2 only)
+-- 2) Peak-hour traffic analysis 
 WITH HourlyTraffic AS (
     SELECT HOUR(App_Timestamp) AS hour_of_day, COUNT(*) AS total_requests
     FROM Application_Logs
@@ -101,7 +92,7 @@ FROM Logs
 WHERE Shutdown IS NOT NULL
 GROUP BY Server_ID;
 
--- 8) Correlate application access with security events (was: hardcoded to Server 3)
+-- 8) Correlate application access with security events  
 SELECT
     al.Server_ID, al.Client_IP, al.End_Point, al.App_Timestamp,
     sl.Sec_Timestamp, sl.Security_Level, sl.Event_Type_ID
@@ -113,7 +104,7 @@ JOIN Security_Logs sl
 WHERE sl.Security_Level = 'High'
 ORDER BY al.Server_ID, al.Client_IP, al.App_Timestamp;
 
--- 9) Avg resource usage per session, highest CPU sessions first (was: hardcoded Server 3)
+-- 9) Avg resource usage per session, highest CPU sessions first  
 SELECT
     Server_ID, Log_ID,
     COUNT(*) AS Entry_Count,
@@ -125,8 +116,7 @@ GROUP BY Server_ID, Log_ID
 ORDER BY Avg_CPU DESC;
 
 -- 10) CPU/memory spike detection via self-join on 5-min sliding window
---     (was: hardcoded to Server 3 only; now works across all servers,
---     and partition pruning still applies if you add a Server_ID filter)
+ 
 SELECT
     curr.Server_ID, curr.Log_ID,
     curr.Metric_Timestamp AS Reading_Time,
@@ -143,28 +133,22 @@ WHERE (curr.CPU_Utilization_Pct - prev.CPU_Utilization_Pct > 15)
    OR (curr.Memory_Space_Usage_MB - prev.Memory_Space_Usage_MB > 500)
 ORDER BY curr.Server_ID, curr.Log_ID, curr.Metric_Timestamp;
 
--- 11) All 4xx/5xx production errors across ALL servers (was: 3-way UNION ALL + join)
+-- 11) All 4xx/5xx production errors across ALL servers 
 SELECT pl.Server_ID, pl.Prod_Timestamp, pl.Status_Code, pl.Message, pl.Developer_ID, pl.Process_ID
 FROM Production_Logs pl
 WHERE pl.Status_Code BETWEEN 400 AND 599
 ORDER BY pl.Prod_Timestamp DESC;
 
--- 12) Frequent restarts (>2/day), any server (was: hardcoded to Server 3)
+-- 12) Frequent restarts (>2/day) 
 SELECT Server_ID, DATE(Startup) AS Restart_Date, COUNT(*) AS Restart_Count
 FROM Logs
 GROUP BY Server_ID, DATE(Startup)
 HAVING COUNT(*) > 2
 ORDER BY Restart_Count DESC;
 
--- 13) Most frequently accessed endpoints, any server (was: hardcoded to Server 1)
+-- 13) Most frequently accessed endpoints 
 SELECT Server_ID, End_Point, COUNT(*) AS Hit_Count
 FROM Application_Logs
 GROUP BY Server_ID, End_Point
 ORDER BY Server_ID, Hit_Count DESC;
 
--- 14) Developers with most production errors, any server (was: hardcoded to Server 1)
-SELECT Server_ID, Developer_ID, COUNT(*) AS Error_Count
-FROM Production_Logs
-WHERE Status_Code BETWEEN 400 AND 599
-GROUP BY Server_ID, Developer_ID
-ORDER BY Server_ID, Error_Count DESC;
