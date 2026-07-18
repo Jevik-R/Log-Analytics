@@ -1,21 +1,10 @@
-# Log Analytics DB — Sharded/Partitioned Redesign (v2)
+# Log Analytics DB 
 
 A redesign of an earlier DBMS coursework project ("Log-Ingestor"), rebuilt to
 actually justify calling it a partitioned/sharded design, with generated
 data, real system behavior (triggers, scheduled jobs, alerting), and
 measured proof rather than assertions.
 
-## Why this redesign exists
-
-The original project modeled three servers as three hand-written, duplicated
-sets of tables (`Server_ID_1_Logs`, `Server_ID_2_Logs`, `Server_ID_3_Logs`,
-...). Every cross-server query needed a manual 3-way `UNION ALL`. Adding a
-4th server meant writing new DDL and editing every query by hand. The
-README called this "scalable" and "sharded" — it wasn't; it was schema
-duplication. This version fixes that, and also addresses two other gaps:
-all data was hand-typed `INSERT` statements (no simulation of real traffic),
-and the project only ever did read-only ad hoc `SELECT`s — no triggers, no
-scheduled jobs, no derived/alerting state.
 
 ## Architecture
 
@@ -158,23 +147,6 @@ mysql log_ingestor_v2 < sql/05_optimized_queries.sql
 mysql log_ingestor_v2 < sql/06_partition_pruning_proof.sql
 ```
 
-## What I'd still call out as unfinished, if asked
-
-- True distributed sharding (separate physical database nodes, a routing
-  layer, cross-shard transactions) is a different and harder problem.
-  MySQL's `PARTITION BY LIST` here is single-node logical partitioning —
-  it improves query planning and manageability, but everything still
-  lives on one MySQL instance. I'm not claiming this is a distributed
-  database.
-- Retention is row-delete based, not partition-drop based (see decision
-  #4 above) — a real gap if this needed to run at genuine scale.
-- Foreign key integrity from log tables to `Cluster_Table` is
-  application-enforced, not database-enforced (see decision #2).
-
 ## Team / attribution
 
-Original DBMS coursework (ERD, normalization, initial query set) was a
-3-person team project (IT214, DA-IICT). This redesign — partitioning,
-triggers, scheduled events, alerting, data generation, and the
-partition-pruning/benchmark proof — was done individually as a follow-up
-to make the project resume-appropriate for SDE interviews.
+DBMS coursework (ERD, normalization, initial query set) team project (IT214, DA-IICT). 
