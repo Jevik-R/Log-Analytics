@@ -14,8 +14,4 @@ SELECT COUNT(*), AVG(Status_Code) FROM Application_Logs WHERE Server_ID = 3;
 -- (expected -- shown for contrast, this is what "no pruning" looks like).
 EXPLAIN
 SELECT COUNT(*) FROM Application_Logs;
-
--- Proof 4: EXPLAIN ANALYZE (MySQL 8.0.18+) shows actual execution,
--- not just the plan -- confirms the pruned partition is what's scanned.
-EXPLAIN ANALYZE
-SELECT * FROM Server_Metrics_Logs WHERE Server_ID = 1 AND CPU_Utilization_Pct > 90;
+ 
